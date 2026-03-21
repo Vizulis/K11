@@ -1,17 +1,18 @@
 from random import randint
-from collections import deque
+from time import time
+
+NODE_COUNT = 0 # datora apskatīto virsotņu skaitītājs
 
 class Node:
-    '''
-    Klase, kas glabā informāciju par katru spēles koka virsotni
+    """
+    Klase, kas glabā spēles stāvokli konkrētā virsotnē.
 
-    id [str]        Katras virsotnes unikālais identifikators
-    sequence [list]   Pašreizējā virkne dotajā virsotnē
-    p1 [int]        Pirmā spēlētāja punkti dotajā virsotnē
-    p2 [int]        Otrā spēlētāja punkti dotajā virsotnē
-    depth [int]   Virsotnes līmenis spēles kokā
-    move [int]   Gājiens, kas tika veikts, lai tiktu pie šīs virsotnes
-    '''
+    id [str]         Virsotnes unikālais identifikators
+    sequence [list]  Pašreizējā skaitļu virkne
+    p1 [int]         1. spēlētāja punkti
+    p2 [int]         2. spēlētāja punkti
+    depth [int]      Virsotnes dziļums/līmenis kokā
+    """
 
     def __init__(self, id, sequence, p1, p2, depth):
         self.id = id
@@ -21,34 +22,45 @@ class Node:
         self.depth = depth
 
     def __str__(self):
-        # Pamainīju __str__, lai būtu labāk salasāms, kad tiek printēts
-        string = f"{self.id}, {self.sequence} \n Player 1 score: {self.p1} \n Player 2 score: {self.p2}"
-        return string
-    
+        return (
+            f"{self.id}, {self.sequence}\n"
+            f"Player 1 score: {self.p1}\n"
+            f"Player 2 score: {self.p2}"
+        )
+
     __repr__ = __str__
 
     def key(self):
-        # Noņēmu līmeni, jo tas nav svarīgs
+        """
+        Unikāla atslēga stāvokļa identificēšanai.
+        Depth netiek izmantots, jo svarīgs ir pats stāvoklis.
+        """
         return (tuple(self.sequence), self.p1, self.p2)
 
-    def heuristic_value(self, maximizing):
-        # Jābūt izvēlei, kurš sāk pirmais(dators vai cilvēks),
-        # tāpēc vērtība, kuru atgriezīs funckija ir atkarīga no tā, kurš sāka
-
+    def heuristic_value(self):
+        """
+        Stabilā heiristiskā funkcija:
+        jo lielāks p1 - p2, jo stāvoklis labāks Player 1.
+        """
         return self.p1 - self.p2
-    
-                     
+
+
 class GameTree:
-    '''
-    Klase, kas glabā visu spēles koku
-    '''
-    
+    """
+    Klase, kas glabā visu spēles koku.
+
+    node_set   - visu virsotņu saraksts
+    edge_set   - loki formā: parent -> [(move, child), ...]
+    node_count - virsotņu skaitītājs ID ģenerēšanai
+    node_dict  - unikālu stāvokļu vārdnīca
+    """
+
     def __init__(self):
         self.node_set = []
         self.edge_set = {}
         self.node_count = 2
         self.node_dict = {}
-    
+
     def add_node(self, node, parent=None, move=None):
         key = node.key()
 
@@ -68,14 +80,18 @@ class GameTree:
                 self.add_edge(parent, move, existing_node)
 
             return existing_node
-    
+
     def add_edge(self, parent, move, child):
         self.edge_set.setdefault(parent, []).append((move, child))
 
     def generate_children(self, node, player):
-        # gajiena_parbaude() ar citu nosaukumu
+        """
+        Izveido visus iespējamos bērnus dotajai virsotnei.
+        Katrs bērns ir pāreja (move, child), nevis move glabāšana pašā virsotnē.
+        """
         children = []
-        for move in [1, 2, 3]:
+
+        for move in [1, 2, 3, 4, 5]:
             if move in node.sequence:
                 new_sequence = node.sequence.copy()
                 new_sequence.remove(move)
@@ -88,7 +104,7 @@ class GameTree:
                     p2_new = node.p2 - move
 
                 new_node = Node(
-                    f'A{self.node_count}',
+                    f"A{self.node_count}",
                     new_sequence,
                     p1_new,
                     p2_new,
@@ -99,64 +115,110 @@ class GameTree:
                 children.append((move, added_node))
 
         return children
+    
+    def get_children(self, node, player): # tiek izmantots priekš on-demand koka ģenerēšanas, kuru izsauc minimax un alpha-beta funkcijas
+        if node not in self.edge_set:
+            return self.generate_children(node, player)
 
-def minimax(tree, node, maximizing, depth):
-    children = tree.edge_set.get(node, [])
+        return self.edge_set.get(node, [])
 
-    if not children or depth == 0:
-        return node.heuristic_value(maximizing)
 
-    if maximizing:
+def minimax(tree, node, depth, player, memo):
+    global NODE_COUNT
+    NODE_COUNT += 1
+    key = (node.key(), depth, player)
+
+    if key in memo:
+        return memo[key]
+
+    if depth == 0 or not node.sequence:
+        value = node.heuristic_value()
+        memo[key] = value
+        return value
+    
+    children = tree.get_children(node, player)
+
+    if not children:
+        value = node.heuristic_value()
+        memo[key] = value
+        return value
+
+    next_player = 2 if player == 1 else 1
+
+    if player == 1:
         best = -float('inf')
-        for move, child in children:
-            best = max(best, minimax(tree, child, False, depth - 1))
+        for _, child in children:
+            val = minimax(tree, child, depth - 1, next_player, memo)
+            best = max(best, val)
     else:
         best = float('inf')
-        for move, child in children:
-            best = min(best, minimax(tree, child, True, depth - 1))
+        for _, child in children:
+            val = minimax(tree, child, depth - 1, next_player, memo)
+            best = min(best, val)
 
+    memo[key] = best
     return best
-    
-def alpha_beta(tree, node, maximizing, depth, alpha=-float('inf'), beta=float('inf')):
-    children = tree.edge_set.get(node, [])
 
-    if not children or depth == 0:
-        return node.heuristic_value(maximizing)
 
-    if maximizing:
+def alpha_beta(tree, node, depth, player, memo, alpha=-float('inf'), beta=float('inf')):
+    global NODE_COUNT
+    NODE_COUNT += 1
+    key = (node.key(), depth, player)
+
+    if key in memo:
+        return memo[key]
+
+    if depth == 0 or not node.sequence:
+        value = node.heuristic_value()
+        memo[key] = value
+        return value
+
+    children = tree.get_children(node, player)
+
+    if not children:
+        value =  node.heuristic_value()
+        memo[key] = value
+        return value
+
+    next_player = 2 if player == 1 else 1
+
+    if player == 1:
         best = -float('inf')
-        for move, child in children:
-            value = alpha_beta(tree, child, False, depth - 1, alpha, beta)
-            best = max(best, value)
+        for _, child in children:
+            val = alpha_beta(tree, child, depth - 1, next_player, memo, alpha, beta)
+            best = max(best, val)
             alpha = max(alpha, best)
 
             if alpha >= beta:
                 break
     else:
         best = float('inf')
-        for move, child in children:
-            value = alpha_beta(tree, child, True, depth - 1, alpha, beta)
-            best = min(best, value)
+        for _, child in children:
+            val = alpha_beta(tree, child, depth - 1, next_player, memo, alpha, beta)
+            best = min(best, val)
             beta = min(beta, best)
 
             if alpha >= beta:
                 break
-
+    
+    memo[key] = best
     return best
 
-def best_move(tree, node, player, depth, algorithm):
-    children = tree.edge_set.get(node, [])
-    children.sort(key=lambda x: x[0])  # sort pēc move
+
+def best_move(tree, node, player, depth, algorithm, memo):
+    children = tree.get_children(node, player)
+    children.sort(key=lambda x: x[0])
 
     best_child = None
+    next_player = 2 if player == 1 else 1
 
     if player == 1:
         best_score = -float('inf')
         for move, child in children:
             if algorithm == "minimax":
-                value = minimax(tree, child, False, depth - 1)
+                value = minimax(tree, child, depth, next_player, memo) # depth - 1 uz depth
             else:
-                value = alpha_beta(tree, child, False, depth - 1)
+                value = alpha_beta(tree, child, depth, next_player, memo) # depth - 1 uz depth
 
             if value > best_score:
                 best_score = value
@@ -165,9 +227,9 @@ def best_move(tree, node, player, depth, algorithm):
         best_score = float('inf')
         for move, child in children:
             if algorithm == "minimax":
-                value = minimax(tree, child, True, depth - 1)
+                value = minimax(tree, child, depth, next_player, memo) # depth - 1 uz depth
             else:
-                value = alpha_beta(tree, child, True, depth - 1)
+                value = alpha_beta(tree, child, depth, next_player, memo) # depth - 1 uz depth
 
             if value < best_score:
                 best_score = value
@@ -177,7 +239,7 @@ def best_move(tree, node, player, depth, algorithm):
 
 
 def human_move(tree, node):
-    children = tree.edge_set.get(node, [])
+    children = tree.get_children(node, 1)
 
     if not children:
         return None
@@ -199,13 +261,12 @@ def human_move(tree, node):
 
 
 def get_sequence():
-    # Ģenerē visu virkni funkcijā, nevis tikai iegūst tās garumu
     while True:
         try:
-            length = int(input("Enter sequence length (15-25): "))
-            if 15 <= length <= 25:
-                sequence = [randint(1, 3) for _ in range(length)]
-                print("Generated sequence: ", sequence)
+            length = int(input("Enter sequence length (15-50): "))
+            if 15 <= length <= 50:
+                sequence = [randint(1, 5) for _ in range(length)]
+                print("Generated sequence:", sequence)
                 return sequence
             print("Invalid input.")
         except ValueError:
@@ -222,122 +283,115 @@ def get_first_player():
         except ValueError:
             print("Invalid input.")
 
+
 def get_game_mode():
-    # Režīms starp Dators vs Dators un Cilvēks vs Dators
     while True:
         try:
             mode = int(input("Choose mode: 1 for Computer vs Computer, 2 for Computer vs Human: "))
             if mode in [1, 2]:
                 return mode
+            print("Invalid input.")
         except ValueError:
-            print("Invalid input")
+            print("Invalid input.")
+
 
 def get_algorithm():
-    # Praktiskā darba prasībās ir rakstīts, ka ir nepieciešams realizēt 2 algoritmus
-    # Šeit lietotājs izvēlas, kuru izmantot priekš datora
     while True:
         algorithm = input("Which algorithm should the computer use? Choices: [minimax, alpha-beta]: ")
         if algorithm in ["minimax", "alpha-beta"]:
             return algorithm
-       
-        print("Invalid input")
-
-def build_tree(tree, root, first_player):
-    # Funkcija, kas izveido visu spēles koku, tika darīts main() funkcijā iepriekš
-    # Ģenerēt daļu no koka(ar dziļumu n), kad tas bija nepieciešams minimax funkcijai ir šausmīgi neefektīvs
-    queue = deque([root])
-    processed = set()
-    
-    while queue:
-        node = queue.popleft()
-        
-        if node.key() in processed:
-            continue
-            
-        processed.add(node.key())
-        
-        if node.depth % 2 == 1:
-            player = first_player
-        else:
-            player = 2 if first_player == 1 else 1
-
-        children = tree.generate_children(node, player)
-
-        for move, child in children:
-            if child.sequence:
-                queue.append(child)
+        print("Invalid input.")
 
 def play_game(tree, mode, node, current_player, max_depth, algorithm):
-    # Funkcija, kas izpilda spēles gaitu un izziņo rezultātu
-    # case 1 ir Dators vs Dators, case 2 ir Cilvēks vs Dators
+    """
+    Izspēlē partiju līdz beigām.
+    """
+    global NODE_COUNT
     match mode:
-        case 1:
-            while node and node.sequence:
-                result = best_move(tree, node, current_player, max_depth, algorithm)
+        case 1:  # Computer vs Computer
+            current_player = 1 # mode = 1, current_player tiek iestatīts kā parasti, vai nu 1 vai nu 2
+
+            memo = {} # atmiņa priekš jau aprēķinātām heiristiskām vērtībām virsotnēm, lai tās netiktu pārrēķinātas vairākas reizes
+            while node.sequence:
+                NODE_COUNT = 0
+                start = time()
+                result = best_move(tree, node, current_player, max_depth, algorithm, memo)
                 if result is None:
                     break
+
                 move, node = result
-                print(f"AI {current_player} made a move: removed {move} from the sequence")
+
+                print(f"AI {current_player} made a move: removed {move}, the AI generated {NODE_COUNT} nodes, move took {time() - start} seconds")
                 print(f"New sequence: {node}")
                 print("-------------------------------------------------------")
+
                 current_player = 2 if current_player == 1 else 1
-        case 2:
-            while node and node.sequence:
-                if current_player == 1:
+
+        case 2:  # Computer vs Human
+            turn = "human" if current_player else "ai" # current_player tiek lietots kā boolean, lai noteiktu gājienu secību
+            player_mapping = {"human": 1, "ai": 2} if current_player else {"ai": 1, "human": 2}
+
+            memo = {} # atmiņa priekš jau aprēķinātām heiristiskām vērtībām virsotnēm, lai tās netiktu pārrēķinātas vairākas reizes
+            while node.sequence:
+                player = player_mapping[turn] # tiek izmantots player_mapping, lai noteiktu pareizo spēlētāju, kurš veic gājienu
+
+                if turn == "human":
                     result = human_move(tree, node)
                     if result is None:
                         break
                     move, node = result
-                    print(f"Human made a move: removed {move} from the sequence")
-                    print(f"New sequence: {node}")
+                    print(f"Human made a move: removed {move}")
+                    print(node)
                     print("-------------------------------------------------------")
-                    current_player = 2
+                    turn = "ai"
+
                 else:
-                    result = best_move(tree, node, current_player, max_depth, algorithm)
+                    NODE_COUNT = 0
+                    start = time()
+                    result = best_move(tree, node, player, max_depth, algorithm, memo)
                     if result is None:
                         break
                     move, node = result
-                    print(f"AI made a move: removed {move} from the sequence")
-                    print(f"New sequence: {node}")
+                    print(f"AI made a move: removed {move}, the AI generated {NODE_COUNT} nodes, move took {time() - start} seconds")
+                    print(node)
                     print("-------------------------------------------------------")
-                    current_player = 1
-
+                    turn = "human"
+                
     print("\nGame over")
-    if node is not None:
-        print("P1 score: ", node.p1)
-        print("P2 score: ", node.p2)
+    print("P1 score:", node.p1)
+    print("P2 score:", node.p2)
 
-        if node.p1 > node.p2:
-            print("Player 1 wins")
-        elif node.p2 > node.p1:
-            print("Player 2 wins")
-        else:
-            print("Draw")
+    if node.p1 > node.p2:
+        print("Player 1 wins")
+    elif node.p2 > node.p1:
+        print("Player 2 wins")
     else:
-        print("No winner: node is None.")
+        print("Draw")
+
 
 def main():
-    # minimax/alpha-beta funkciju meklēšanas dziļums
-    MAX_SEARCH_DEPTH = 10
+    play = "Y"
+    while play == "Y":
+        MAX_SEARCH_DEPTH = 10
 
-    # Iegūst režīmu un virkni, pēc režīma nosaka pirmo spēlētāju(Dators vs Dators gadījumā tam nav starpības, tāpēc iestatīts kā 1)
-    sequence = get_sequence()
-    mode = get_game_mode()
+        sequence = get_sequence()
+        mode = get_game_mode()
 
-    if mode == 2:
-        first_player = get_first_player()
-    else:
-        first_player = 1
+        if mode == 2:
+            first_player = get_first_player() == 1 # pašreiz first_player ir bool, pēc tam tiek iestatīts, atkarībā no mode
+        else:
+            first_player = False
 
-    algorithm = get_algorithm()
+        algorithm = get_algorithm()
 
-    # Izveido root virsotni un uzbūvē no tā visu pārējo koku
-    tree = GameTree()
-    root = Node('A1', sequence, 80, 80, 1)
-    tree.add_node(root)
+        tree = GameTree()
+        root = Node('A1', sequence, 150, 150, 1)
+        tree.add_node(root)
 
-    build_tree(tree, root, first_player)
-    play_game(tree, mode, root, first_player, MAX_SEARCH_DEPTH, algorithm)
+        play_game(tree, mode, root, first_player, MAX_SEARCH_DEPTH, algorithm)
+
+        play = input("Play again? Y/N: ")
+
 
 if __name__ == "__main__":
     main()
