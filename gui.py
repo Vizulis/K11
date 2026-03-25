@@ -1,173 +1,470 @@
-from tkinter import *
-from tkinter import ttk  # Necessary for the modern dropdown (Combobox)
-import random
-# from main import Node, GameTree, build_tree, best_move
-
-root = Tk()  # izmanto lai izveidotu logu
-root.title("Sequence game")  # tas izveidos nosaukumu logam
-root.geometry("1200x600+60+50")  # tas ir loga atrašanas un izmēra iestatījumi, kad logs paradas. Shēma: logaPlatumsxlogaAugstums+atkāpeNoKreisasPuses+atkāpeNoAugšas
-
-############################################## "START MENU" DEVELOPMENT STARTS
-l_length = Label(text="Enter sequence length (15-50)", width=80)
-l_mode_dropdown = Label(text="Choose game mode:", width=80) # я переместила сюда, чтобы все label были в одном месте
-mode_options = [
-    "AI vs AI",
-    "AI vs Human (Human starts)"
-    "AI vs Human (AI starts)"
-]
-l_algo_dropdown = Label(text="Choose Algorithm:")
-l_player1_points = Label(text="Player_1 points:") # наверное надо еще дописать в скобках, чтобы передать параметр того, сколько у игрока в данный момент очков
-l_player2_points = Label(text="Player_2 points:") # наверное надо еще дописать, чтобы передать параметр того, сколько у игрока в данный момент очков
-l_player1_move = Label(text="Player_1 removed:") # наверное надо еще дописать, чтобы передать параметр того, какую цифру убрал игрок
-l_player2_move = Label(text="Player_2 removed:") # наверное надо еще дописать, чтобы передать параметр того, какую цифру убрал игрок
-l_virkne = Label(text="virkne bus seit") # это поле, в котором будет храниться сначала сгенерированная virkne, и потом будет обновляться после ходов игроков
-l_nodes_generated = Label(text="genereto virsotnu skaits") # будет показывать сколько вершин сгенерировал ии
-
-get_choice_length = IntVar(value=15)  # Iestatām noklusējuma vērtību 15
-get_choice_mode_text = StringVar()  # Šis glabās tekstu no dropdowna
-get_choice_algorithm = StringVar()  # Šis glabās izvēlēto algoritmu
-
-e_choice_length = Entry(textvariable=get_choice_length, width=40)  # lauki, kuros lietotājs ieraksta atbildi
-e_choice_mode = ttk.Combobox(textvariable=get_choice_mode_text, values=mode_options, state="readonly", width=40)
-e_choice_mode.current(1)  # Uzliek noklusējumu uz "AI vs Human (Human starts)"
-
-algo_options = ["minimax", "alpha-beta"]
-e_choice_algorithm = ttk.Combobox(textvariable=get_choice_algorithm, values=algo_options, state="readonly", width=40)
-e_choice_algorithm.current(1)  # Uzliek noklusējumu uz "alpha-beta"
+import tkinter as tk
+from tkinter import ttk
+from random import randint
+import time
 
 
-def start_game():
-    sequence_length = get_choice_length.get()
+# --- BACKEND LOĢIKA ---
 
-    # Loģika, lai pārvērstu dropdown tekstu atpakaļ skaitļos dzinējam
-    mode_text = get_choice_mode_text.get()
-    algorithm = get_choice_algorithm.get()
+NODE_COUNT = 0 # datora apskatīto virsotņu skaitītājs
 
-    mode = 0
-    who_first = 0
+class Node:
+    """
+    Klase, kas glabā spēles stāvokli konkrētā virsotnē.
 
-    if mode_text == "AI vs AI":
-        mode = 1
-        who_first = 2
-    elif mode_text == "AI vs Human (Human starts)":
-        mode = 2
-        who_first = 1
-    elif mode_text == "AI vs Human (AI starts)":
-        mode = 2
-        who_first = 2
+    id [str]         Virsotnes unikālais identifikators
+    sequence [list]  Pašreizējā skaitļu virkne
+    p1 [int]         1. spēlētāja punkti
+    p2 [int]         2. spēlētāja punkti
+    depth [int]      Virsotnes dziļums/līmenis kokā
+    """
 
+    def __init__(self, id, sequence, p1, p2, depth):
+        self.id = id
+        self.sequence = sequence.copy()
+        self.p1 = p1
+        self.p2 = p2
+        self.depth = depth
 
-    ########### Vremenno:
-    print(f"Length: {sequence_length}, Mode: {mode}, Who starts: {who_first}, Algo: {algorithm}")
-    ###########
+    def __str__(self):
+        return (
+            f"{self.id}, {self.sequence}\n"
+            f"Player 1 score: {self.p1}\n"
+            f"Player 2 score: {self.p2}"
+        )
 
+    __repr__ = __str__
 
-def end_of_game(): # эта функция должна вызываться после последнего возможного хода и выводить очки обоих игроков, кто выиграл, и внизу должна быть кнопка b_start_new_game начать новую игру
-    end_window = Toplevel()
-    end_window.title("Game is over")
-    end_window.geometry("600x600")
-    #в Toplevel(), то есть в дочернем окне, всё создается точно так же, как и в основном окне, просто надо вместо root
-    #писать имя окна, и в атрибутах всегда перым прописать окно, в котором все будет происходить
-    l_p1_score = Label(end_window, text="Player_1 score:", width=40)
-    l_p2_score = Label(end_window, text="Player_2 score:", width=40)
-    l_winner = Label(end_window, text="Winner:", width=40)
+    def key(self):
+        """
+        Unikāla atslēga stāvokļa identificēšanai.
+        Depth netiek izmantots, jo svarīgs ir pats stāvoklis.
+        """
+        return (tuple(self.sequence), self.p1, self.p2)
 
-    # b_start_new_game = Button(end_window, text="Start new game", command=new_game) Эту кнопку я хочу использовать как кнопку, которая все обнулит и можно будет начать новую игру.
-    # #Эта кнопка должна появиться в окне номер 2, то есть в окне, где выводится инфо об финале игры, победителе и очках.
-    l_p1_score.grid(row=1, column=1, pady=20)
-    l_p2_score.grid(row=2, column=1, pady=20)
-    l_winner.grid(row=2, column=1, pady=20)
-    #b_start_new_game.grid(row=4, column=2, pady=20)
-
-
-def statistics(): # эта функция должна появляться в конце каждой игры, и хранить в себе информацию о всех партиях. С плана- это окно номер три
-    stats_window = Toplevel()
-    stats_window.title("Statistics")
-    stats_window.geometry("700x600")
-
-    #таблица из 5 записей для минимакса(в эти строки потом будут вписываться записи про результаты):
-    l_info_minmax = Label(stats_window, text="Minimax statistics", width=40)
-    l_minm_seq1_length = Label(stats_window, text="", width=40)
-    l_minm_seq2_length = Label(stats_window, text="", width=40)
-    l_minm_seq3_length = Label(stats_window, text="", width=40)
-    l_minm_seq4_length = Label(stats_window, text="", width=40)
-    l_minm_seq5_length = Label(stats_window, text="", width=40)
-    l_time_seq1_minmax = Label(stats_window, text="", width=40) #если получится, то я думала среднее время от построения деревьев сюда для каждой отдельной игры
-    l_time_seq2_minmax = Label(stats_window, text="", width=40)
-    l_time_seq3_minmax = Label(stats_window, text="", width=40)
-    l_time_seq4_minmax = Label(stats_window, text="", width=40)
-    l_time_seq5_minmax = Label(stats_window, text="", width=40)
-
-    #таблица из 5 записей для альфа-беты
-    l_info_alfbet = Label(stats_window, text="Alpha-beta statistics", width=40)
-    l_alfbet_seq1_length = Label(stats_window, text="", width=40)
-    l_alfbet_seq2_length = Label(stats_window, text="", width=40)
-    l_alfbet_seq3_length = Label(stats_window, text="", width=40)
-    l_alfbet_seq4_length = Label(stats_window, text="", width=40)
-    l_alfbet_seq5_length = Label(stats_window, text="", width=40)
-    l_time_seq1_alfbet = Label(stats_window, text="", width=40)
-    l_time_seq2_alfbet = Label(stats_window, text="", width=40)
-    l_time_seq3_alfbet = Label(stats_window, text="", width=40)
-    l_time_seq4_alfbet = Label(stats_window, text="", width=40)
-    l_time_seq5_alfbet = Label(stats_window, text="", width=40)
-
-    l_info_minmax.grid(row=1, column=1, pady=20)
-    l_minm_seq1_length.grid(row=2, column=1, pady=5)
-    l_minm_seq2_length.grid(row=3, column=1, pady=5)
-    l_minm_seq3_length.grid(row=4, column=1, pady=5)
-    l_minm_seq4_length.grid(row=5, column=1, pady=5)
-    l_minm_seq5_length.grid(row=6, column=1, pady=5)
-    l_time_seq1_minmax.grid(row=2, column=2, pady=5)
-    l_time_seq2_minmax.grid(row=3, column=2, pady=5)
-    l_time_seq3_minmax.grid(row=4, column=2, pady=5)
-    l_time_seq4_minmax.grid(row=5, column=2, pady=5)
-    l_time_seq5_minmax.grid(row=6, column=2, pady=5)
-    l_info_alfbet.grid(row=7, column=1, pady=20)
-    l_alfbet_seq1_length.grid(row=8, column=1, pady=5)
-    l_alfbet_seq2_length.grid(row=9, column=1, pady=5)
-    l_alfbet_seq3_length.grid(row=10, column=1, pady=5)
-    l_alfbet_seq4_length.grid(row=11, column=1, pady=5)
-    l_alfbet_seq5_length.grid(row=12, column=1, pady=5)
-    l_time_seq1_alfbet.grid(row=8, column=2, pady=5)
-    l_time_seq2_alfbet.grid(row=9, column=2, pady=5)
-    l_time_seq3_alfbet.grid(row=10, column=2, pady=5)
-    l_time_seq4_alfbet.grid(row=11, column=2, pady=5)
-    l_time_seq5_alfbet.grid(row=12, column=2, pady=5)
+    def heuristic_value(self):
+        """
+        Stabilā heiristiskā funkcija:
+        jo lielāks p1 - p2, jo stāvoklis labāks Player 1.
+        """
+        return self.p1 - self.p2
 
 
-b_start_game = Button(text="Start", command=start_game)
-b_one = Button(text="1", width=5) # DODELATJS VSE KNOPKI-CIFRI, например, добавить command(склоняюсь к комманд) или добавить части для bind(), чтобы кнопки стали функциональными
-b_two = Button(text="2", width=5)
-b_three = Button(text="3", width=5)
-b_four = Button(text="4", width=5)
-b_five = Button(text="5", width=5)
-# эти кнопки нужны для того, чтобы пользователь выбирал цифру, которую хочет убрать из ряда, и нажав на кнопку, эта цифра была стерта
+class GameTree:
+    """
+    Klase, kas glabā visu spēles koku.
 
-# все храниться в том порядке, в каком все появляется на окне
-l_length.grid(row=1, column=6, pady=5)
-e_choice_length.grid(row=2, column=6, pady=5)
+    node_set   - visu virsotņu saraksts
+    edge_set   - loki formā: parent -> [(move, child), ...]
+    node_count - virsotņu skaitītājs ID ģenerēšanai
+    node_dict  - unikālu stāvokļu vārdnīca
+    """
 
-l_mode_dropdown.grid(row=3, column=6, pady=5)
-e_choice_mode.grid(row=4, column=6, pady=5)
+    def __init__(self):
+        self.node_set = []
+        self.edge_set = {}
+        self.node_count = 2
+        self.node_dict = {}
 
-l_algo_dropdown.grid(row=5, column=6, pady=5)
-e_choice_algorithm.grid(row=6, column=6, pady=5)
+    def add_node(self, node, parent=None, move=None):
+        key = node.key()
 
-b_start_game.grid(row=7, column=7, pady=20)
+        if key not in self.node_dict:
+            self.node_set.append(node)
+            self.node_dict[key] = node
 
-l_player1_points.grid(row=8, column=1, pady=20)
-l_player2_points.grid(row=8, column=7, pady=20)
-l_player1_move.grid(row=9, column=1, pady=20)
-l_player2_move.grid(row=9, column=7, pady=20)
-b_one.grid(row=10, column=1, padx=10, pady=10)
-b_two.grid(row=10, column=2, padx=10, pady=10)
-b_three.grid(row=10, column=3, padx=10, pady=10)
-b_four.grid(row=10, column=4, padx=10, pady=10)
-b_five.grid(row=10, column=5, padx=10, pady=10)
-l_virkne.grid(row=12, column=6, pady=20)
-l_nodes_generated.grid(row=13, column=6, pady=20)
+            if parent is not None:
+                self.add_edge(parent, move, node)
 
-############################################## "START MENU" DEVELOPMENT ENDS
+            self.node_count += 1
+            return node
+        else:
+            existing_node = self.node_dict[key]
+
+            if parent is not None:
+                self.add_edge(parent, move, existing_node)
+
+            return existing_node
+
+    def add_edge(self, parent, move, child):
+        self.edge_set.setdefault(parent, []).append((move, child))
+
+    def generate_children(self, node, player):
+        """
+        Izveido visus iespējamos bērnus dotajai virsotnei.
+        Katrs bērns ir pāreja (move, child), nevis move glabāšana pašā virsotnē.
+        """
+        children = []
+
+        for move in [1, 2, 3, 4, 5]:
+            if move in node.sequence:
+                new_sequence = node.sequence.copy()
+                new_sequence.remove(move)
+
+                if player == 1:
+                    p1_new = node.p1 - move
+                    p2_new = node.p2
+                else:
+                    p1_new = node.p1
+                    p2_new = node.p2 - move
+
+                new_node = Node(
+                    f"A{self.node_count}",
+                    new_sequence,
+                    p1_new,
+                    p2_new,
+                    node.depth + 1
+                )
+
+                added_node = self.add_node(new_node, node, move)
+                children.append((move, added_node))
+
+        return children
+    
+    def get_children(self, node, player): # tiek izmantots priekš on-demand koka ģenerēšanas, kuru izsauc minimax un alpha-beta funkcijas
+        if node not in self.edge_set:
+            return self.generate_children(node, player)
+
+        return self.edge_set.get(node, [])
 
 
-root.mainloop()
+def minimax(tree, node, depth, player, memo):
+    global NODE_COUNT
+    NODE_COUNT += 1
+    key = (node.key(), depth, player)
+
+    if key in memo:
+        return memo[key]
+
+    if depth == 0 or not node.sequence:
+        value = node.heuristic_value()
+        memo[key] = value
+        return value
+    
+    children = tree.get_children(node, player)
+
+    if not children:
+        value = node.heuristic_value()
+        memo[key] = value
+        return value
+
+    next_player = 2 if player == 1 else 1
+
+    if player == 1:
+        best = -float('inf')
+        for _, child in children:
+            val = minimax(tree, child, depth - 1, next_player, memo)
+            best = max(best, val)
+    else:
+        best = float('inf')
+        for _, child in children:
+            val = minimax(tree, child, depth - 1, next_player, memo)
+            best = min(best, val)
+
+    memo[key] = best
+    return best
+
+
+def alpha_beta(tree, node, depth, player, memo, alpha=-float('inf'), beta=float('inf')):
+    global NODE_COUNT
+    NODE_COUNT += 1
+    key = (node.key(), depth, player)
+
+    if key in memo:
+        return memo[key]
+
+    if depth == 0 or not node.sequence:
+        value = node.heuristic_value()
+        memo[key] = value
+        return value
+
+    children = tree.get_children(node, player)
+
+    if not children:
+        value =  node.heuristic_value()
+        memo[key] = value
+        return value
+
+    next_player = 2 if player == 1 else 1
+
+    if player == 1:
+        best = -float('inf')
+        for _, child in children:
+            val = alpha_beta(tree, child, depth - 1, next_player, memo, alpha, beta)
+            best = max(best, val)
+            alpha = max(alpha, best)
+
+            if alpha >= beta:
+                break
+    else:
+        best = float('inf')
+        for _, child in children:
+            val = alpha_beta(tree, child, depth - 1, next_player, memo, alpha, beta)
+            best = min(best, val)
+            beta = min(beta, best)
+
+            if alpha >= beta:
+                break
+    
+    memo[key] = best
+    return best
+
+
+def best_move(tree, node, player, depth, algorithm, memo):
+    children = tree.get_children(node, player)
+    children.sort(key=lambda x: x[0])
+
+    best_child = None
+    next_player = 2 if player == 1 else 1
+
+    if player == 1:
+        best_score = -float('inf')
+        for move, child in children:
+            if algorithm == "minimax":
+                value = minimax(tree, child, depth, next_player, memo) # depth - 1 uz depth
+            else:
+                value = alpha_beta(tree, child, depth, next_player, memo) # depth - 1 uz depth
+
+            if value > best_score:
+                best_score = value
+                best_child = (move, child)
+    else:
+        best_score = float('inf')
+        for move, child in children:
+            if algorithm == "minimax":
+                value = minimax(tree, child, depth, next_player, memo) # depth - 1 uz depth
+            else:
+                value = alpha_beta(tree, child, depth, next_player, memo) # depth - 1 uz depth
+
+            if value < best_score:
+                best_score = value
+                best_child = (move, child)
+
+    return best_child
+
+# --- GUI LOĢIKA ---
+
+class GameApp: # jauna klase grafiskajam interfeisam
+    def __init__(self, root): 
+        self.root = root 
+        self.root.title("Sequence game")
+        self.root.attributes('-fullscreen', True) # Loga defaults ir fullscreen
+        self.root.geometry("1200x600+60+50") 
+        self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False)) # escape poga fullscreen iziesanai
+        
+        # Šeit "aktivizē" spēles mainīgos
+        self.tree = None 
+        self.current_node = None 
+        self.mode = 1 
+        self.player_mapping = {} 
+        self.turn = "" 
+        self.algo = "alpha-beta" 
+        self.max_depth = 10 
+        self.game_running = False 
+        self.total_ai_time = 0.0 # laika skaitīšanai
+        self.games_count = 0 
+        self.ai_wins_count = 0
+
+        self.setup_ui() 
+
+    def setup_ui(self): 
+        ########  SĀKAS "START MENU" IZVEIDE 
+    
+        self.l_length = tk.Label(text="Enter sequence length (15-50)", width=80)
+        self.l_mode_dropdown = tk.Label(text="Choose game mode:", width=80) 
+        self.mode_options = [
+            "AI vs AI",
+            "AI vs Human (Human starts)",
+            "AI vs Human (AI starts)"
+        ]
+        self.l_algo_dropdown = tk.Label(text="Choose Algorithm:")
+        
+        self.get_choice_length = tk.IntVar(value=15)
+        self.e_choice_length = tk.Entry(textvariable=self.get_choice_length, width=40)
+        self.e_choice_mode = ttk.Combobox(values=self.mode_options, state="readonly", width=40)
+        self.e_choice_mode.current(1)
+
+        algo_options = ["minimax", "alpha-beta"]
+        self.e_choice_algorithm = ttk.Combobox(values=algo_options, state="readonly", width=40)
+        self.e_choice_algorithm.current(1)
+
+        self.b_start_game = tk.Button(text="Start", command=self.start_game)
+
+        self.l_stats = tk.Label(text="Games played: 0 | AI wins: 0", font=("Helvetica", 10, "bold"))
+
+        # Speles izvades logi
+        self.l_player1_points = tk.Label(text="Player_1 points:") 
+        self.l_player2_points = tk.Label(text="Player_2 points:") 
+        self.l_player1_move = tk.Label(text="Player_1 removed:") 
+        self.l_player2_move = tk.Label(text="Player_2 removed:") 
+        self.l_virkne = tk.Message(text="", width=800) # Nomainiju uz tk.message jo tas wrapojas pats
+        self.l_nodes_generated = tk.Label(text="") 
+
+        # Pogas Cilveka gajieniem
+        self.num_buttons = [] 
+        self.b_one = tk.Button(text="1", width=5, command=lambda: self.human_move(1))
+        self.b_two = tk.Button(text="2", width=5, command=lambda: self.human_move(2))
+        self.b_three = tk.Button(text="3", width=5, command=lambda: self.human_move(3))
+        self.b_four = tk.Button(text="4", width=5, command=lambda: self.human_move(4))
+        self.b_five = tk.Button(text="5", width=5, command=lambda: self.human_move(5))
+        self.num_buttons = [self.b_one, self.b_two, self.b_three, self.b_four, self.b_five] 
+
+        #teksta lauki visai informacijai
+        self.l_length.grid(row=1, column=6, pady=5)
+        self.e_choice_length.grid(row=2, column=6, pady=5)
+        self.l_mode_dropdown.grid(row=3, column=6, pady=5)
+        self.e_choice_mode.grid(row=4, column=6, pady=5)
+        self.l_algo_dropdown.grid(row=5, column=6, pady=5)
+        self.e_choice_algorithm.grid(row=6, column=6, pady=5)
+        self.b_start_game.grid(row=7, column=7, pady=20)
+        
+        self.l_stats.grid(row=7, column=6, pady=20)
+
+        self.l_player1_points.grid(row=8, column=1, pady=20)
+        self.l_player2_points.grid(row=8, column=7, pady=20)
+        self.l_player1_move.grid(row=9, column=1, pady=20)
+        self.l_player2_move.grid(row=9, column=7, pady=20)
+        self.b_one.grid(row=10, column=1, padx=10, pady=10)
+        self.b_two.grid(row=10, column=2, padx=10, pady=10)
+        self.b_three.grid(row=10, column=3, padx=10, pady=10)
+        self.b_four.grid(row=10, column=4, padx=10, pady=10)
+        self.b_five.grid(row=10, column=5, padx=10, pady=10)
+        self.l_virkne.grid(row=12, column=6, pady=20)
+        self.l_nodes_generated.grid(row=13, column=6, pady=20)
+        
+        self.toggle_buttons(False) 
+
+    def toggle_buttons(self, state): 
+        s = tk.NORMAL if state else tk.DISABLED # Šī palīgfunkcija  deaktivizē visas aktīvās pogas, lai ir vieglāk ar tam darboties
+        for b in self.num_buttons: 
+            b.config(state=s) 
+
+    def start_game(self):
+        self.games_count += 1
+        self.l_stats.config(text=f"Games played: {self.games_count} | AI wins: {self.ai_wins_count}")
+
+        sequence_length = self.get_choice_length.get()
+        mode_text = self.e_choice_mode.get()
+        self.algo = self.e_choice_algorithm.get()
+        self.total_ai_time = 0.0 #spēles sākumā laiks ir 0
+
+        # Loģika, lai pārvērstu dropdown tekstu atpakaļ skaitļos dzinējam
+        if mode_text == "AI vs AI":
+            self.mode = 1
+            self.turn = "ai1"
+        elif mode_text == "AI vs Human (Human starts)":
+            self.mode = 2
+            self.player_mapping = {"human": 1, "ai": 2}
+            self.turn = "human"
+        elif mode_text == "AI vs Human (AI starts)":
+            self.mode = 2
+            self.player_mapping = {"ai": 1, "human": 2}
+            self.turn = "ai"
+
+        # Spēles inicializācija 
+        sequence = [randint(1, 5) for _ in range(sequence_length)] 
+        self.tree = GameTree()  
+        self.current_node = Node('A1', sequence, 150, 150, 1)  
+        self.tree.add_node(self.current_node) 
+        self.game_running = True  
+        self.update_ui() 
+        self.process_turn()
+    # funkcija grafiskas vides atjauninašanai pec karta gajiena 
+    def update_ui(self, last_move=None, mover=None): 
+        self.l_virkne.config(text=f"Sequence: {self.current_node.sequence}") 
+        self.l_player1_points.config(text=f"Player_1 points: {self.current_node.p1}") 
+        self.l_player2_points.config(text=f"Player_2 points: {self.current_node.p2}") 
+        if last_move: 
+            if mover == 1: self.l_player1_move.config(text=f"Player_1 removed: {last_move}") 
+            else: self.l_player2_move.config(text=f"Player_2 removed: {last_move}") 
+
+    def process_turn(self): 
+        if not self.current_node.sequence: 
+            self.end_of_game() 
+            return 
+
+        if self.mode == 1: # AI vs AI
+            self.root.after(600, self.ai_move) 
+        elif self.mode == 2: # AI vs Human
+            if self.turn == "ai": 
+                self.root.after(600, self.ai_move) 
+            else: 
+                self.toggle_buttons(True) 
+
+    def human_move(self, value): 
+        if not self.game_running or self.turn != "human": return 
+        if value not in self.current_node.sequence: return 
+
+        player_idx = self.player_mapping["human"] 
+        children = self.tree.get_children(self.current_node, player_idx) 
+        # Atrod gājienu un nomaina spēles stāvokli
+        for move, child in children: 
+            if move == value: 
+                self.current_node = child 
+                self.update_ui(value, player_idx) 
+                self.turn = "ai" 
+                self.toggle_buttons(False) 
+                self.process_turn() 
+                break 
+
+    def ai_move(self):
+        global NODE_COUNT 
+        if not self.game_running: return 
+        
+        NODE_COUNT = 0 
+        player_idx = 1 if self.turn == "ai1" else (2 if self.turn == "ai2" else self.player_mapping["ai"]) 
+
+        memo = {} 
+# Aprēķina labāko gājienu un mēra patērēto laiku
+        start_time = time.time()
+        result = best_move(self.tree, self.current_node, player_idx, self.max_depth, self.algo, memo) 
+        self.total_ai_time += (time.time() - start_time)
+        # Ja gājiens atrasts, atjauno informāciju un turpina spēli
+        if result: 
+            move, node = result 
+            self.current_node = node 
+            self.l_nodes_generated.config(text=f"Generated Nodes: {NODE_COUNT}") 
+            self.update_ui(move, player_idx) 
+            
+            if self.mode == 1: 
+                self.turn = "ai2" if self.turn == "ai1" else "ai1" 
+            else: 
+                self.turn = "human" 
+            self.process_turn() 
+        else: 
+            self.end_of_game() 
+# Ja gājienu vairs nav, spēle beidzas
+    def end_of_game(self): # Šī funkcija tiek izsaukta spēles beigās.
+        self.game_running = False 
+        end_window = tk.Toplevel()
+        end_window.title("Game is over")
+        end_window.geometry("600x600")
+
+        p1_score = self.current_node.p1 
+        p2_score = self.current_node.p2 
+        winner_name = "Draw" 
+        
+        if p1_score > p2_score: 
+            winner_name = "Player 1"
+            if self.mode == 1: self.ai_wins_count += 1 # AI vs AI (viens no tiem ir AI)
+            elif self.mode == 2 and self.player_mapping["ai"] == 1: self.ai_wins_count += 1
+        elif p2_score > p1_score: 
+            winner_name = "Player 2" 
+            if self.mode == 1: self.ai_wins_count += 1
+            elif self.mode == 2 and self.player_mapping["ai"] == 2: self.ai_wins_count += 1
+
+        # Atjaunojam galveno statistikas rindu
+        self.l_stats.config(text=f"Games played: {self.games_count} | AI wins: {self.ai_wins_count}")
+
+        tk.Label(end_window, text=f"Player_1 score: {p1_score}", width=40).grid(row=1, column=1, pady=10)
+        tk.Label(end_window, text=f"Player_2 score: {p2_score}", width=40).grid(row=2, column=1, pady=10)
+        tk.Label(end_window, text=f"Winner: {winner_name}", width=40, font=("Helvetica", 12, "bold")).grid(row=3, column=1, pady=10)
+        
+        tk.Label(end_window, text=f"Algorithm used: {self.algo.upper()}", width=40).grid(row=4, column=1, pady=10)
+        
+        tk.Label(end_window, text=f"Total Algorithm Time: {self.total_ai_time:.4f} seconds", width=40).grid(row=5, column=1, pady=10)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = GameApp(root)
+    root.mainloop()
